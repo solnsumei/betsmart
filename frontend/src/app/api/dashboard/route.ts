@@ -48,8 +48,8 @@ export async function GET() {
     let totalStaked = 0;
     let totalReturned = 0;
     settledSlips.forEach((s) => {
-      totalStaked += s.stake;
-      totalReturned += s.status === "won" ? s.payout || 0 : 0;
+      totalStaked += parseFloat(s.stake);
+      totalReturned += s.status === "won" ? parseFloat(s.payout || "0") : 0;
     });
 
     const netProfit = parseFloat((totalReturned - totalStaked).toFixed(2));
@@ -58,7 +58,7 @@ export async function GET() {
     const sortedSettled = [...settledSlips].sort((a, b) => a.placedAt.getTime() - b.placedAt.getTime());
     let cumulative = 0;
     const chartData = sortedSettled.map((s) => {
-      const profit = s.status === "won" ? (s.payout || 0) - s.stake : -s.stake;
+      const profit = s.status === "won" ? parseFloat(s.payout || "0") - parseFloat(s.stake) : -parseFloat(s.stake);
       cumulative += profit;
       return {
         date: s.placedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
@@ -109,22 +109,23 @@ export async function GET() {
     const mappedPendingBets = pendingSlips.map((s) => {
       return {
         id: s.id,
-        stake: s.stake,
-        totalOdds: s.totalOdds,
+        stake: parseFloat(s.stake),
+        totalOdds: parseFloat(s.totalOdds),
         placedAt: s.placedAt,
         selections: betsBySlipMap.get(s.id) || [],
       };
     });
 
     const mappedPastBets = settledSlips.map((s) => {
-      const payoutVal = s.payout || 0;
+      const payoutVal = parseFloat(s.payout || "0");
+      const stakeVal = parseFloat(s.stake);
       return {
         id: s.id,
-        stake: s.stake,
-        totalOdds: s.totalOdds,
+        stake: stakeVal,
+        totalOdds: parseFloat(s.totalOdds),
         status: s.status,
         placedAt: s.placedAt,
-        profit: s.status === "won" ? parseFloat((payoutVal - s.stake).toFixed(2)) : -s.stake,
+        profit: s.status === "won" ? parseFloat((payoutVal - stakeVal).toFixed(2)) : -stakeVal,
         selections: betsBySlipMap.get(s.id) || [],
       };
     });

@@ -90,14 +90,16 @@ def query_historical_stats(home_team: str, away_team: str) -> Dict[str, Any]:
     keyword_home = get_clean_keyword(home_team)
     keyword_away = get_clean_keyword(away_team)
 
+    from sqlmodel import col
+
     with Session(engine) as session:
         # Pre-filter matches in SQL
         statement = select(HistoricalMatches).where(
             or_(
-                HistoricalMatches.home_team.ilike(f"%{keyword_home}%"),
-                HistoricalMatches.away_team.ilike(f"%{keyword_home}%"),
-                HistoricalMatches.home_team.ilike(f"%{keyword_away}%"),
-                HistoricalMatches.away_team.ilike(f"%{keyword_away}%")
+                col(HistoricalMatches.home_team).ilike(f"%{keyword_home}%"),
+                col(HistoricalMatches.away_team).ilike(f"%{keyword_home}%"),
+                col(HistoricalMatches.home_team).ilike(f"%{keyword_away}%"),
+                col(HistoricalMatches.away_team).ilike(f"%{keyword_away}%")
             )
         )
         candidates = session.exec(statement).all()

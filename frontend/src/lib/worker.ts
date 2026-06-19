@@ -184,10 +184,10 @@ async function attemptPlaceAccumulator(config: any) {
   // Filter further in JavaScript to ensure odds are in target range
   const filtered = qualifying.filter((q) => {
     let selectionOdds = 0;
-    if (q.prediction.predictedOutcome === "1X") selectionOdds = q.match.odds1X || 0;
-    if (q.prediction.predictedOutcome === "12") selectionOdds = q.match.odds12 || 0;
-    if (q.prediction.predictedOutcome === "X2") selectionOdds = q.match.oddsX2 || 0;
-    return selectionOdds >= config.minOdds && selectionOdds <= config.maxOdds;
+    if (q.prediction.predictedOutcome === "1X") selectionOdds = parseFloat(q.match.odds1X || "0");
+    if (q.prediction.predictedOutcome === "12") selectionOdds = parseFloat(q.match.odds12 || "0");
+    if (q.prediction.predictedOutcome === "X2") selectionOdds = parseFloat(q.match.oddsX2 || "0");
+    return selectionOdds >= parseFloat(config.minOdds) && selectionOdds <= parseFloat(config.maxOdds);
   });
 
   const minSize = config.accumulatorMinSize;
@@ -201,9 +201,9 @@ async function attemptPlaceAccumulator(config: any) {
     let totalOdds = 1;
     const items = selectionsToBet.map((s) => {
       let selectionOdds = 1;
-      if (s.prediction.predictedOutcome === "1X") selectionOdds = s.match.odds1X || 1;
-      if (s.prediction.predictedOutcome === "12") selectionOdds = s.match.odds12 || 1;
-      if (s.prediction.predictedOutcome === "X2") selectionOdds = s.match.oddsX2 || 1;
+      if (s.prediction.predictedOutcome === "1X") selectionOdds = parseFloat(s.match.odds1X || "1");
+      if (s.prediction.predictedOutcome === "12") selectionOdds = parseFloat(s.match.odds12 || "1");
+      if (s.prediction.predictedOutcome === "X2") selectionOdds = parseFloat(s.match.oddsX2 || "1");
 
       totalOdds *= selectionOdds;
       return {
@@ -224,14 +224,14 @@ async function attemptPlaceAccumulator(config: any) {
       .from(betSlips)
       .where(sql`${betSlips.placedAt} >= ${today}`);
 
-    const maxDailyStake = config.accountBalance * config.maxDailyStakePercent;
+    const maxDailyStake = parseFloat(config.accountBalance) * config.maxDailyStakePercent;
 
-    if (sum + config.stake > maxDailyStake) {
+    if (sum + parseFloat(config.stake) > maxDailyStake) {
       console.warn(`[Risk Manager] Cannot place bet slip: Daily limit exceeded. Staked today: ₦${sum}, Limit: ₦${maxDailyStake}`);
       return;
     }
 
-    if (config.accountBalance < config.stake) {
+    if (parseFloat(config.accountBalance) < parseFloat(config.stake)) {
       console.warn(`[Risk Manager] Cannot place bet slip: Insufficient balance. Balance: ₦${config.accountBalance}, Stake: ₦${config.stake}`);
       return;
     }
@@ -242,7 +242,7 @@ async function attemptPlaceAccumulator(config: any) {
         .insert(betSlips)
         .values({
           stake: config.stake,
-          totalOdds,
+          totalOdds: totalOdds.toFixed(2),
           status: "pending",
           isSimulation: config.isSimulation,
         })
@@ -253,7 +253,7 @@ async function attemptPlaceAccumulator(config: any) {
           betSlipId: slip.id,
           matchId: item.matchId,
           selection: item.selection,
-          odds: item.odds,
+          odds: item.odds.toFixed(2),
         });
       }
 
@@ -384,14 +384,14 @@ export const settleWorker = new Worker(
           }
 
           const slipStatus = wonSlip ? "won" : "lost";
-          const payout = wonSlip ? parseFloat((slip.stake * slip.totalOdds).toFixed(2)) : 0;
+          const payout = wonSlip ? parseFloat((parseFloat(slip.stake) * parseFloat(slip.totalOdds)).toFixed(2)) : 0;
 
           await db.transaction(async (tx) => {
             await tx
               .update(betSlips)
               .set({
                 status: slipStatus,
-                payout,
+                payout: payout.toFixed(2),
               })
               .where(eq(betSlips.id, slip.id));
 

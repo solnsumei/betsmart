@@ -3,9 +3,10 @@ import httpx
 import re
 import json
 import redis
-from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
-from sqlmodel import Session, select, func, text, and_
+from sqlmodel import Session, select, func, text, and_, col
 
 from database import engine, Settings, Matches, Predictions, BetSlips, Bets, CrawlTargets, CrawlRuns
 from crawler import crawl_odds
@@ -33,11 +34,11 @@ def run_crawling(session: Session) -> int:
     """
     Scrape matches, cache all to Redis, and queue predictions only for qualifying matches.
     """
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     config = get_settings(session)
     
     # Fetch all enabled crawl targets
-    targets_stmt = select(CrawlTargets).where(CrawlTargets.enabled == True)
+    targets_stmt = select(CrawlTargets).where(col(CrawlTargets.enabled) == True)
     targets = session.exec(targets_stmt).all()
     
     crawl_urls = [t.url for t in targets] if targets else [config.crawling_url]
@@ -79,8 +80,17 @@ def run_crawling(session: Session) -> int:
 
             # Check if double chance odds are disabled
             odds_list = [m.get("odds1X"), m.get("odds12"), m.get("oddsX2")]
-            valid_odds = [o for o in odds_list if o is not None and o > 0]
-            if not valid_odds:
+            # Convert values to Decimal if they are numbers and > 0
+            decimal_odds = []
+            for o in odds_list:
+                if o is not None:
+                    try:
+                        dec_o = Decimal(str(o))
+                        if dec_o > Decimal('0'):
+                            decimal_odds.append(dec_o)
+                    except Exception:
+                        pass
+            if not decimal_odds:
                 print(f"[Worker Crawl] Skipping match {m['id']}: Double chance odds are disabled/missing.")
                 continue
             
@@ -89,7 +99,7 @@ def run_crawling(session: Session) -> int:
                 print(f"[Worker Crawl] Skipping match {m['id']}: Already predicted recently (cached in Redis).")
                 continue
                 
-            pred_stmt = select(Predictions).where(Predictions.match_id == m['id'])
+            pred_stmt = select(Predictions).where(col(Predictions.match_id) == m['id'])
             pred_db = session.exec(pred_stmt).first()
             if pred_db:
                 print(f"[Worker Crawl] Skipping match {m['id']}: Already has a prediction in the database.")
@@ -99,13 +109,13 @@ def run_crawling(session: Session) -> int:
                 
             # If valid odds exist, check if at least one option qualifies
             qualifies = False
-            for o in valid_odds:
+            for o in decimal_odds:
                 if config.min_odds <= o <= config.max_odds:
                     qualifies = True
                     break
             
             if not qualifies:
-                print(f"[Worker Crawl] Skipping prediction for match {m['id']}: Odds {valid_odds} do not qualify within limit [{config.min_odds} - {config.max_odds}].")
+                print(f"[Worker Crawl] Skipping prediction for match {m['id']}: Odds {decimal_odds} do not qualify within limit [{config.min_odds} - {config.max_odds}].")
                 continue
                 
             try:
@@ -126,7 +136,7 @@ def run_crawling(session: Session) -> int:
                 # Skip the current match being processed for non-fatal/parsing issues
                 print(f"[Worker Crawl] Skipping match {m['id']} due to prediction error: {e}")
                 
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     duration = (end_time - start_time).total_seconds()
     
     # Save crawl runs record
@@ -176,7 +186,7 @@ def run_prediction(match_data_or_id: Any, session: Session) -> Optional[Predicti
                 m["matchTime"] = datetime.fromisoformat(m["matchTime"])
         else:
             # Fallback to database if not in Redis
-            match_stmt = select(Matches).where(Matches.id == match_id)
+            match_stmt = select(Matches).where(col(Matches.id) == match_id)
             match_db = session.exec(match_stmt).first()
             if not match_db:
                 return None
@@ -186,9 +196,9 @@ def run_prediction(match_data_or_id: Any, session: Session) -> Optional[Predicti
                 "awayTeam": match_db.away_team,
                 "league": match_db.league,
                 "matchTime": match_db.match_time,
-                "odds1X": match_db.odds_1x,
-                "odds12": match_db.odds_12,
-                "oddsX2": match_db.odds_x2
+                "odds1X": float(match_db.odds_1x) if match_db.odds_1x is not None else None,
+                "odds12": float(match_db.odds_12) if match_db.odds_12 is not None else None,
+                "oddsX2": float(match_db.odds_x2) if match_db.odds_x2 is not None else None
             }
     else:
         m = match_data_or_id
@@ -196,8 +206,8 @@ def run_prediction(match_data_or_id: Any, session: Session) -> Optional[Predicti
 
     # 2. Generate prediction using Agno agent
     result = predict_match(
-        home_team=m["homeTeam"],
-        away_team=m["awayTeam"],
+        home_team=str(m["homeTeam"]),
+        away_team=str(m["awayTeam"]),
         provider=config.llm_provider,
         model_name=config.llm_model,
         ollama_url=config.ollama_url
@@ -221,25 +231,41 @@ def run_prediction(match_data_or_id: Any, session: Session) -> Optional[Predicti
         return None
 
     # Insert Match record if it doesn't exist
-    match_db = session.exec(select(Matches).where(Matches.id == match_id)).first()
+    match_db = session.exec(select(Matches).where(col(Matches.id) == match_id)).first()
     if not match_db:
+        def to_decimal_or_none(val):
+            if val is None or val == "":
+                return None
+            try:
+                return Decimal(str(val))
+            except Exception:
+                return None
+
         match_db = Matches(
             id=match_id,
-            home_team=m["homeTeam"],
-            away_team=m["awayTeam"],
-            league=m.get("league", "Unknown League"),
-            match_time=m["matchTime"],
+            home_team=str(m["homeTeam"]),
+            away_team=str(m["awayTeam"]),
+            league=str(m.get("league", "Unknown League")),
+            match_time=str(m["matchTime"]),
             status="upcoming",
-            odds_1x=m.get("odds1X"),
-            odds_12=m.get("odds12"),
-            odds_x2=m.get("oddsX2")
+            odds_1x=to_decimal_or_none(m.get("odds1X")),
+            odds_12=to_decimal_or_none(m.get("odds12")),
+            odds_x2=to_decimal_or_none(m.get("oddsX2"))
         )
         session.add(match_db)
     else:
         # Update odds on the existing match record
-        match_db.odds_1x = m.get("odds1X")
-        match_db.odds_12 = m.get("odds12")
-        match_db.odds_x2 = m.get("oddsX2")
+        def to_decimal_or_none(val):
+            if val is None or val == "":
+                return None
+            try:
+                return Decimal(str(val))
+            except Exception:
+                return None
+
+        match_db.odds_1x = to_decimal_or_none(m.get("odds1X"))
+        match_db.odds_12 = to_decimal_or_none(m.get("odds12"))
+        match_db.odds_x2 = to_decimal_or_none(m.get("oddsX2"))
         session.add(match_db)
     
     # Insert Prediction record
@@ -270,7 +296,6 @@ def run_prediction(match_data_or_id: Any, session: Session) -> Optional[Predicti
         
     print(f"[Worker Predict] Saved qualified match and prediction to PostgreSQL: {m['homeTeam']} vs {m['awayTeam']} -> {result['predictedOutcome']} (Confidence: {result['confidence']:.2f})")
     return prediction
-    return None
 
 
 def attempt_place_accumulator(session: Session):
@@ -282,10 +307,10 @@ def attempt_place_accumulator(session: Session):
     # Fetch all predictions for upcoming matches that are not yet associated with any bet slip
     # and have high confidence
     qualifying_query = select(Predictions, Matches).join(
-        Matches, Predictions.match_id == Matches.id
+        Matches, col(Predictions.match_id) == col(Matches.id)
     ).where(
-        Matches.status == "upcoming",
-        Predictions.confidence >= config.min_confidence
+        col(Matches.status) == "upcoming",
+        col(Predictions.confidence) >= config.min_confidence
     )
     
     results = session.exec(qualifying_query).all()
@@ -299,25 +324,21 @@ def attempt_place_accumulator(session: Session):
             continue
             
         # Check if already placed a bet on this match
-        bet_stmt = select(Bets).where(Bets.match_id == match.id)
+        bet_stmt = select(Bets).where(col(Bets.match_id) == match.id)
         if session.exec(bet_stmt).first():
             continue
             
-        selection_odds = 0.0
+        selection_odds = Decimal('0.00')
         if pred.predicted_outcome == "1X":
-            selection_odds = match.odds_1x or 0.0
+            selection_odds = match.odds_1x or Decimal('0.00')
         elif pred.predicted_outcome == "12":
-            selection_odds = match.odds_12 or 0.0
+            selection_odds = match.odds_12 or Decimal('0.00')
         elif pred.predicted_outcome == "X2":
-            selection_odds = match.odds_x2 or 0.0
+            selection_odds = match.odds_x2 or Decimal('0.00')
             
         if config.min_odds <= selection_odds <= config.max_odds:
             seen_match_ids.add(match.id)
-            filtered.append({
-                "match": match,
-                "prediction": pred,
-                "odds": selection_odds
-            })
+            filtered.append((match, pred, selection_odds))
 
     min_size = config.accumulator_min_size
     max_size = config.accumulator_max_size
@@ -326,20 +347,20 @@ def attempt_place_accumulator(session: Session):
         selections_to_bet = filtered[:max_size]
         
         # Calculate combined odds
-        total_odds = 1.0
-        for s in selections_to_bet:
-            total_odds *= s["odds"]
-        total_odds = round(total_odds, 2)
+        total_odds = Decimal('1.00')
+        for match, pred, odds in selections_to_bet:
+            total_odds *= odds
+        total_odds = total_odds.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         
         # Check daily stake limits
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         today_start = datetime(today.year, today.month, today.day)
         
         # Sum of stakes placed today
-        placed_today_query = select(func.coalesce(func.sum(BetSlips.stake), 0)).where(BetSlips.placed_at >= today_start)
+        placed_today_query = select(func.coalesce(func.sum(col(BetSlips.stake)), 0)).where(col(BetSlips.placed_at) >= today_start)
         staked_today = session.exec(placed_today_query).one()
         
-        max_daily_stake = config.account_balance * config.max_daily_stake_percent
+        max_daily_stake = config.account_balance * Decimal(str(config.max_daily_stake_percent))
         if staked_today + config.stake > max_daily_stake:
             print(f"[Risk Manager] Cannot place bet slip: Daily limit exceeded. Staked today: ₦{staked_today}, Limit: ₦{max_daily_stake}")
             return
@@ -359,12 +380,15 @@ def attempt_place_accumulator(session: Session):
         session.commit()
         session.refresh(slip)
         
-        for s in selections_to_bet:
+        for match, pred, odds in selections_to_bet:
+            if slip.id is None:
+                continue
+                
             bet = Bets(
                 bet_slip_id=slip.id,
-                match_id=s["match"].id,
-                selection=s["prediction"].predicted_outcome,
-                odds=s["odds"]
+                match_id=match.id,
+                selection=pred.predicted_outcome,
+                odds=odds
             )
             session.add(bet)
             
@@ -394,7 +418,7 @@ def settle_match_results(session: Session) -> int:
     # Get all matches that should be finished (kickoff in the past) and are not marked completed
     # We check matches that started at least 2 hours and 30 minutes ago
     cutoff_time = datetime.now() - timedelta(hours=2, minutes=30)
-    past_matches_stmt = select(Matches).where(Matches.status != "completed").where(Matches.match_time <= cutoff_time)
+    past_matches_stmt = select(Matches).where(col(Matches.status) != "completed").where(col(Matches.match_time) <= cutoff_time)
     past_matches = session.exec(past_matches_stmt).all()
     
     if not past_matches:
@@ -460,7 +484,7 @@ def settle_match_results(session: Session) -> int:
                         model_name=config.llm_model,
                         ollama_url=config.ollama_url
                     )
-                    if score_res and score_res.get("finished") and score_res.get("homeGoals") >= 0 and score_res.get("awayGoals") >= 0:
+                    if score_res and score_res.get("finished") and score_res.get("homeGoals", 0) >= 0 and score_res.get("awayGoals", 0) >= 0:
                         home_goals = score_res["homeGoals"]
                         away_goals = score_res["awayGoals"]
                         print(f"[Worker Settle] Resolved via Web Search + LLM: {match.home_team} vs {match.away_team} -> {home_goals}:{away_goals}")
@@ -483,7 +507,7 @@ def settle_match_results(session: Session) -> int:
                 match.status = "completed"
                 match.result = result
                 match.double_chance_result = double_chance
-                match.updated_at = datetime.utcnow()
+                match.updated_at = datetime.now(timezone.utc)
                 session.add(match)
                 session.commit()
                 settled_matches_count += 1
@@ -507,10 +531,10 @@ def settle_match_results(session: Session) -> int:
                     print(f"[Worker Settle] Redis publish error: {pub_err}")
                 
         # Re-evaluate all pending bet slips
-        pending_slips_stmt = select(BetSlips).where(BetSlips.status == "pending")
+        pending_slips_stmt = select(BetSlips).where(col(BetSlips.status) == "pending")
         pending_slips = session.exec(pending_slips_stmt).all()
         for slip in pending_slips:
-            slip_bets_stmt = select(Bets, Matches).join(Matches, Bets.match_id == Matches.id).where(Bets.bet_slip_id == slip.id)
+            slip_bets_stmt = select(Bets, Matches).join(Matches, col(Bets.match_id) == col(Matches.id)).where(col(Bets.bet_slip_id) == slip.id)
             slip_bets = session.exec(slip_bets_stmt).all()
             
             # Update individual bet statuses first for completed matches
@@ -518,7 +542,7 @@ def settle_match_results(session: Session) -> int:
                 if match.status == "completed" and bet.status == "pending":
                     dc_res = match.double_chance_result or ""
                     bet.status = "won" if bet.selection in dc_res else "lost"
-                    bet.updated_at = datetime.utcnow()
+                    bet.updated_at = datetime.now(timezone.utc)
                     session.add(bet)
             session.commit()
             
@@ -527,7 +551,7 @@ def settle_match_results(session: Session) -> int:
             if all_finished:
                 won_slip = all(bet.status == "won" for bet, match in slip_bets)
                 status = "won" if won_slip else "lost"
-                payout = round(slip.stake * slip.total_odds, 2) if won_slip else 0.0
+                payout = (slip.stake * slip.total_odds).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if won_slip else Decimal('0.00')
                 
                 slip.status = status
                 slip.payout = payout

@@ -232,6 +232,9 @@ def extract_with_ai(page_text: str, provider: str = "groq", model_name: str = "l
         content_str = response.content if hasattr(response, "content") else str(response)
         
         # Clean markdown code blocks
+        if content_str is None:
+            return []
+        
         if "```" in content_str:
             json_match = re.search(r"\{.*\}", content_str, re.DOTALL)
             if json_match:

@@ -22,9 +22,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "System settings not configured." }, { status: 500 });
     }
 
-    if (config.accountBalance < stake) {
+    if (parseFloat(config.accountBalance) < stake) {
       return NextResponse.json(
-        { error: `Insufficient balance. Available balance: ₦${config.accountBalance.toLocaleString()}` },
+        { error: `Insufficient balance. Available balance: ₦${parseFloat(config.accountBalance).toLocaleString()}` },
         { status: 400 }
       );
     }
@@ -45,8 +45,8 @@ export async function POST(request: Request) {
       const [newSlip] = await tx
         .insert(betSlips)
         .values({
-          stake: stake,
-          totalOdds: totalOdds,
+          stake: stake.toFixed(2),
+          totalOdds: totalOdds.toFixed(2),
           status: "pending",
           isSimulation: config.isSimulation,
         })
@@ -58,15 +58,15 @@ export async function POST(request: Request) {
           betSlipId: newSlip.id,
           matchId: sel.matchId,
           selection: sel.selection,
-          odds: sel.odds,
+          odds: sel.odds.toFixed(2),
         });
       }
 
       // 3. Deduct Stake from Settings Balance
-      const updatedBalance = parseFloat((config.accountBalance - stake).toFixed(2));
+      const updatedBalance = parseFloat((parseFloat(config.accountBalance) - stake).toFixed(2));
       await tx
         .update(settings)
-        .set({ accountBalance: updatedBalance })
+        .set({ accountBalance: updatedBalance.toFixed(2) })
         .where(eq(settings.id, config.id));
 
       return {

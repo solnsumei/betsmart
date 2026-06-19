@@ -1,14 +1,14 @@
-import { pgTable, serial, text, real, timestamp, boolean, doublePrecision, integer, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, real, timestamp, boolean, doublePrecision, integer, jsonb, numeric } from "drizzle-orm/pg-core";
 
 export const settings = pgTable("settings", {
   id: serial("id").primaryKey(),
   crawlingUrl: text("crawling_url").notNull().default("https://web.bet9ja.com"),
   historicDataApiUrl: text("historic_data_api_url").notNull().default("https://api.football-data.org/v4"),
   historicDataApiKey: text("historic_data_api_key").notNull().default(""),
-  minOdds: doublePrecision("min_odds").notNull().default(1.15),
-  maxOdds: doublePrecision("max_odds").notNull().default(1.50),
+  minOdds: numeric("min_odds", { precision: 10, scale: 2 }).notNull().default("1.15"),
+  maxOdds: numeric("max_odds", { precision: 10, scale: 2 }).notNull().default("1.50"),
   minConfidence: doublePrecision("min_confidence").notNull().default(0.70),
-  stake: doublePrecision("stake").notNull().default(1000.0),
+  stake: numeric("stake", { precision: 10, scale: 2 }).notNull().default("1000.00"),
   ollamaUrl: text("ollama_url").notNull().default("http://127.0.0.1:11434"),
   llmProvider: text("llm_provider").notNull().default("ollama"), // 'ollama' or 'groq'
   llmModel: text("llm_model").notNull().default("llama3"),
@@ -17,7 +17,7 @@ export const settings = pgTable("settings", {
   accumulatorMinSize: integer("accumulator_min_size").notNull().default(2),
   accumulatorMaxSize: integer("accumulator_max_size").notNull().default(5),
   targetAccuracy: doublePrecision("target_accuracy").notNull().default(0.90),
-  accountBalance: doublePrecision("account_balance").notNull().default(50000.0),
+  accountBalance: numeric("account_balance", { precision: 10, scale: 2 }).notNull().default("50000.00"),
   maxDailyStakePercent: doublePrecision("max_daily_stake_percent").notNull().default(0.10),
   seasonsToSync: text("seasons_to_sync").notNull().default("2526,2425,2324,2223,2122,2021"),
   cacheTime: integer("cache_time").notNull().default(120), // in minutes
@@ -33,9 +33,9 @@ export const matches = pgTable("matches", {
   status: text("status").notNull().default("upcoming"), // 'upcoming', 'completed', 'cancelled'
   result: text("result"), // '1', 'X', '2'
   doubleChanceResult: text("double_chance_result"), // '1X', '12', 'X2'
-  odds1X: doublePrecision("odds_1x"),
-  odds12: doublePrecision("odds_12"),
-  oddsX2: doublePrecision("odds_x2"),
+  odds1X: numeric("odds_1x", { precision: 10, scale: 2 }),
+  odds12: numeric("odds_12", { precision: 10, scale: 2 }),
+  oddsX2: numeric("odds_x2", { precision: 10, scale: 2 }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -51,10 +51,10 @@ export const predictions = pgTable("predictions", {
 export const betSlips = pgTable("bet_slips", {
   id: serial("id").primaryKey(),
   status: text("status").notNull().default("pending"), // 'pending', 'won', 'lost'
-  stake: doublePrecision("stake").notNull(),
-  totalOdds: doublePrecision("total_odds").notNull(),
+  stake: numeric("stake", { precision: 10, scale: 2 }).notNull(),
+  totalOdds: numeric("total_odds", { precision: 10, scale: 2 }).notNull(),
   placedAt: timestamp("placed_at", { withTimezone: true }).defaultNow().notNull(),
-  payout: doublePrecision("payout"),
+  payout: numeric("payout", { precision: 10, scale: 2 }),
   isSimulation: boolean("is_simulation").notNull().default(true),
 });
 
@@ -63,7 +63,7 @@ export const bets = pgTable("bets", {
   betSlipId: integer("bet_slip_id").references(() => betSlips.id, { onDelete: "cascade" }).notNull(),
   matchId: text("match_id").references(() => matches.id, { onDelete: "cascade" }).notNull(),
   selection: text("selection").notNull(), // '1X', '12', 'X2'
-  odds: doublePrecision("odds").notNull(),
+  odds: numeric("odds", { precision: 10, scale: 2 }).notNull(),
   status: text("status").notNull().default("pending"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   placedAt: timestamp("placed_at", { withTimezone: true }).defaultNow().notNull(),

@@ -62,13 +62,24 @@ export default function PredictionsPage() {
       const setData = await setRes.json();
       
       if (predRes.ok) {
-        setPredictionsList(predData.predictions || []);
+        const parsedPredictions = (predData.predictions || []).map((p: any) => ({
+          ...p,
+          odds1X: p.odds1X ? parseFloat(p.odds1X) : null,
+          odds12: p.odds12 ? parseFloat(p.odds12) : null,
+          oddsX2: p.oddsX2 ? parseFloat(p.oddsX2) : null,
+        }));
+        setPredictionsList(parsedPredictions);
         setSummary(predData.summary || null);
       }
       if (setRes.ok) {
-        setSettings(setData);
+        const parsedSettings = {
+          ...setData,
+          accountBalance: parseFloat(setData.accountBalance) || 0,
+          stake: parseFloat(setData.stake) || 0,
+        };
+        setSettings(parsedSettings);
         if (setData.stake) {
-          setCustomStake(setData.stake);
+          setCustomStake(parseFloat(setData.stake) || 1000);
         }
       }
     } catch (e) {
