@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BetSmart ⚽🧠
+### Double-Chance Predictor & Parlay Automation System
 
-## Getting Started
+BetSmart is an advanced, automated sports betting analytical platform. It combines a Next.js client-side dashboard with an autonomous Python workflow to scrape double-chance odds, generate double-chance (1X, 12, X2) predictions using Large Language Models (LLMs), build simulated parlay/accumulator bet slips, and settle results via automated API calls or robust multi-query search fallbacks.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 🏛️ System Architecture
+
+```mermaid
+graph TD
+    A[Bet9ja Scraper / Playwright] -->|Crawl Odds| B(Python worker.py)
+    B -->|Query Stats / H2H| C[(PostgreSQL Database)]
+    B -->|News Search| D[Tavily Search API]
+    B -->|Generate Prediction| E[Local Ollama / Cloud LLM]
+    B -->|Place Accumulator| C
+    B -->|Publish SSE Event| F[(Redis Event Bus)]
+    F -->|Push Updates| G[Next.js SSE Endpoint]
+    G -->|Real-time Logs & Toast| H[Next.js Frontend React Page]
+    I[Football API / Multi-query Fallback] -->|Settle Scores| B
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 1. Python Backend
+* **`scheduler.py`**: Executes the odds extraction, prediction, risk manager, and settlement pipelines at regular intervals.
+* **`worker.py`**: Contains the core business logic (evaluating odds qualifiers, checking daily stake limits, compiling accumulators, and resolving match scores).
+* **`crawler.py`**: A multi-stage crawler that leverages **Robocorp Browser (Playwright)** and **Scrapy** to scrape pre-match double-chance odds.
+* **`agent.py`**: Orchestrates LLM Inferences for match predictions (using stats + news context) and handles score extractions via local Ollama models or Cloud LLM APIs.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 2. Next.js Frontend
+* **Real-time SSE Dashboard**: Listens to Redis channels via Server-Sent Events to show instant toast notifications for crawl finishes, bet slip placements, and match settlements.
+* **Granular Predictions Log**: Offers searchable, paginated tabs to filter predictions by *Not Placed*, *Placed & Unsettled*, and *Placed & Settled* categories.
+* **Manual Slip Builder**: Allows constructing manual parlay bet slips from upcoming predictions, displaying potential payouts and enforcing target accuracy thresholds.
+* **System Control Center**: A custom settings section to manage active crawl targets, database CSV imports, and simulation limits.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## ✨ Key Features
 
-To learn more about Next.js, take a look at the following resources:
+* **SRL & Zoom Filtering**: Automatically discards Simulated Reality Leagues (`SRL`), Zoom soccer, and virtual matches to protect statistical integrity.
+* **LLM Prediction Engine**: Queries historical team head-to-head records and recent news context before generating double-chance predictions (supported by Ollama `qwen` / `granite`, Groq, OpenAI, and Gemini).
+* **Automated Accumulators**: Compiles qualifying matches (based on minimum confidence and odds thresholds) into simulated accumulator parlay slips.
+* **Reliable Settlement Engine**: Queries the Football-Data API for finished matches. If scores are missing (e.g. niche leagues), it triggers a **robust multi-query fallback** using Tavily + Google search strings, utilizing the LLM to extract final score lines (e.g., `4-4`).
+* **Sleek, Premium UI**: Custom dark mode layout using modern components, SVG micro-animations, dynamic toast pop-ups, and native glassmorphism details.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🛠️ Getting Started
 
-## Deploy on Vercel
+### 1. Requirements
+* Node.js (v18+)
+* Python (v3.10+)
+* Redis Server (running on `localhost:6379`)
+* PostgreSQL Database
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 2. Configuration (`.env`)
+Create a `.env` file in the root directory:
+```env
+# Database & Cache
+DATABASE_URL=postgres://username:password@localhost:5432/betsmart
+REDIS_URL=redis://localhost:6379
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# LLM Providers (Ollama, Groq, Gemini, or OpenAI)
+LLM_PROVIDER=ollama
+LLM_MODEL=granite4.1:3b
+OLLAMA_HOST=http://127.0.0.1:11434
+
+# API Keys
+TAVILY_API_KEY=your_tavily_key
+FOOTBALL_API_TOKEN=your_football_data_token
+FOOTBALL_API_URL=https://api.football-data.org/v4/matches
+GROQ_API_KEY=your_groq_key
+```
+
+### 3. Setup Python Backend
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python scheduler.py
+```
+
+### 4. Setup Next.js Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) to view the live dashboard.
+
+---
+
+## 📄 License
+This project is licensed under the MIT License.
